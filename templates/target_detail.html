@@ -1,129 +1,84 @@
 {% extends "base.html" %}
-{% block title %} - Цель {{ target.name }}{% endblock %}
+{% block title %} - {{ target.name }}{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center">
-    <h2>Цель: {{ target.name }} <small class="text-muted">(TID {{ target.tid }})</small></h2>
-    <a href="{{ url_for('delete_target', tid=target.tid) }}" class="btn btn-danger" onclick="return confirm('Удалить цель {{ target.name }}? Все LUN и ACL будут удалены.')">Удалить цель</a>
-</div>
+<h2>{{ target.name }} <small class="text-muted">(TID {{ target.tid }})</small>
+    <a href="{{ url_for('delete_target', tid=target.tid) }}" class="btn btn-danger btn-sm" onclick="return confirm('Удалить?')">Удалить цель</a>
+</h2>
 
-<h4 class="mt-4">💾 Logical Units (LUN)</h4>
-{% if target.luns %}
-    <table class="table table-bordered table-sm">
-        <thead>
-            <tr><th>LUN</th><th>Тип</th><th>Backing store</th><th>Действие</th></tr>
-        </thead>
-        <tbody>
-        {% for lun in target.luns %}
-            <tr>
-                <td>{{ lun.num }}</td>
-                <td>{{ lun.type }}</td>
-                <td><code>{{ lun.backing_store }}</code></td>
-                <td><a href="{{ url_for('delete_lun', tid=target.tid, lun_num=lun.num) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить LUN {{ lun.num }}?')">Удалить</a></td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-{% else %}
-    <p>Нет LUN</p>
-{% endif %}
+<h4>LUN</h4>
+<table class="table table-bordered">
+    {% for lun in target.luns if lun.num != '0' %}
+    <tr>
+        <td>LUN {{ lun.num }}</td>
+        <td>{{ lun.type }}</td>
+        <td><code>{{ lun.backing_store }}</code></td>
+        <td><a href="{{ url_for('delete_lun', tid=target.tid, lun_num=lun.num) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить LUN?')">Удалить</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">Нет LUN (кроме LUN 0 контроллера)</td></tr>
+    {% endfor %}
+</table>
 
 <h5>Добавить LUN</h5>
-<form method="post" action="{{ url_for('add_lun', tid=target.tid) }}" class="row g-3 mb-4">
+<form method="post" action="{{ url_for('add_lun', tid=target.tid) }}" class="row g-2 mb-4">
     <div class="col-auto">
-        <input type="text" name="path" class="form-control" placeholder="/dev/sdb1 или /var/lib/iscsi_images/disk1.img" required>
+        <select name="path" class="form-select">
+            <option value="">-- Введите путь вручную или выберите образ --</option>
+            {% for img in images %}
+            <option value="{{ img.path }}">{{ img.name }} ({{ img.size_mb }} МБ)</option>
+            {% endfor %}
+        </select>
     </div>
     <div class="col-auto">
-        <button type="submit" class="btn btn-success">➕ Добавить LUN</button>
+        <input type="text" name="path_custom" class="form-control" placeholder="Или введите путь вручную">
     </div>
     <div class="col-auto">
-        <small class="text-muted">Можно указать существующий образ из списка: 
-        {% for img in images %}{{ img.path }} {% endfor %}
-        </small>
+        <button type="submit" class="btn btn-success">Добавить LUN</button>
     </div>
+    <div class="col-auto"><small class="text-muted">Выберите существующий образ или укажите путь к блочному устройству.</small></div>
 </form>
 
-<hr>
-
-<h4>🔌 Активные сессии (подключения)</h4>
+<h4>Активные сессии</h4>
 {% if target.sessions %}
-    <table class="table table-striped">
-        <thead>
-            <tr><th>ID сессии</th><th>Инициатор</th><th>IP адрес</th><th>Доступные LUN</th></tr>
-        </thead>
-        <tbody>
-        {% for sess in target.sessions %}
-            <tr>
-                <td>{{ sess.id }}</td>
-                <td>{{ sess.initiator }}</td>
-                <td>{{ sess.ip }}</td>
-                <td>{{ sess.luns|join(', ') }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-{% else %}
-    <p>Нет активных подключений к этой цели.</p>
-{% endif %}
-
-<hr>
-
-<h4>🔒 ACL (разрешённые инициаторы по IQN)</h4>
-{% if target.acls %}
-    <ul class="list-group mb-3">
-    {% for init in target.acls %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-            {{ init }}
-            <a href="{{ url_for('delete_acl', tid=target.tid, initiator=init) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить доступ для {{ init }}?')">Удалить</a>
-        </li>
+<table class="table">
+    {% for s in target.sessions %}
+    <tr><td>{{ s.id }}</td><td>{{ s.initiator }}</td><td>{{ s.ip }}</td></tr>
     {% endfor %}
-    </ul>
-{% else %}
-    <p>Нет ограничений (доступ любому инициатору)</p>
-{% endif %}
+</table>
+{% else %}<p>Нет подключений</p>{% endif %}
 
-<h5>Добавить ACL (IQN инициатора)</h5>
-<form method="post" action="{{ url_for('add_acl', tid=target.tid) }}" class="row g-3 mb-4">
+<h4>ACL</h4>
+<ul>{% for a in target.acls %}<li>{{ a }} <a href="{{ url_for('delete_acl', tid=target.tid, initiator=a) }}" class="btn btn-sm btn-outline-danger">Удалить</a></li>{% else %}<li>Любой инициатор</li>{% endfor %}</ul>
+<form method="post" action="{{ url_for('add_acl', tid=target.tid) }}" class="row g-2"><div class="col-auto"><input name="initiator" placeholder="iqn..."></div><div class="col-auto"><button class="btn btn-primary">Добавить ACL</button></div></form>
+
+<h4>CHAP аутентификация</h4>
+<p>Привязанные учётные записи:</p>
+<ul>{% for acc in target.accounts %}<li>{{ acc }} <a href="{{ url_for('remove_chap_from_target', tid=target.tid, user=acc) }}" class="btn btn-sm btn-outline-danger">Отвязать</a></li>{% else %}<li>Не привязаны</li>{% endfor %}</ul>
+
+<h5>Привязать CHAP учётку</h5>
+<form method="post" action="{{ url_for('add_chap_to_target', tid=target.tid) }}" class="row g-2">
     <div class="col-auto">
-        <input type="text" name="initiator" class="form-control" placeholder="iqn.1993-08.org.debian:01:client1" required>
+        <select name="chap_user_select" class="form-select">
+            <option value="">-- Выберите существующую учётку --</option>
+            {% for acc in all_chap_accounts %}
+            <option value="{{ acc }}">{{ acc }}</option>
+            {% endfor %}
+        </select>
     </div>
     <div class="col-auto">
-        <button type="submit" class="btn btn-primary">➕ Добавить ACL</button>
+        <span class="align-middle">или</span>
+    </div>
+    <div class="col-auto">
+        <input type="text" name="chap_user_new" class="form-control" placeholder="Новый логин">
+    </div>
+    <div class="col-auto">
+        <input type="password" name="chap_password_new" class="form-control" placeholder="Пароль">
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-warning">Привязать</button>
     </div>
 </form>
+<p><small>Если указан существующий логин, пароль не нужен. Если указан новый логин, необходимо заполнить пароль.</small></p>
 
-<hr>
-
-<h4>🔐 MS‑CHAP аутентификация</h4>
-<p>CHAP учётные записи, привязанные к этой цели:</p>
-{% if target.accounts %}
-    <ul class="list-group mb-3">
-    {% for acc in target.accounts %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-            {{ acc }}
-            <a href="{{ url_for('remove_chap_from_target', tid=target.tid, user=acc) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Отвязать CHAP учётку {{ acc }} от цели?')">Отвязать</a>
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>CHAP не настроен (аутентификация по IQN или без аутентификации).</p>
-{% endif %}
-
-<h5>Привязать существующую или новую CHAP учётку</h5>
-<form method="post" action="{{ url_for('add_chap_to_target', tid=target.tid) }}" class="row g-3">
-    <div class="col-md-4">
-        <input type="text" name="chap_user" class="form-control" placeholder="Логин CHAP" required>
-    </div>
-    <div class="col-md-4">
-        <input type="password" name="chap_password" class="form-control" placeholder="Пароль CHAP">
-    </div>
-    <div class="col-auto">
-        <button type="submit" class="btn btn-warning">Привязать CHAP</button>
-    </div>
-    <div class="col-auto">
-        <small class="text-muted">Если учётка не существует, она будет создана.</small>
-    </div>
-</form>
-<p class="mt-2"><a href="{{ url_for('chap_accounts') }}" class="btn btn-sm btn-secondary">Управление всеми CHAP учётками</a></p>
-
-<p><a href="{{ url_for('index') }}" class="btn btn-secondary mt-4">← Назад к списку целей</a></p>
+<a href="{{ url_for('index') }}" class="btn btn-secondary">Назад</a>
 {% endblock %}

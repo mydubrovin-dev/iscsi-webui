@@ -5,18 +5,36 @@
 
 <div class="row mb-4">
     <div class="col-md-6">
-        <div class="card">
-            <div class="card-header">Создать новую цель</div>
-            <div class="card-body">
-                <form method="post" action="{{ url_for('add_target') }}">
-                    <div class="mb-3">
-                        <label class="form-label">IQN (например, iqn.2025-04.local.server:disk1)</label>
-                        <input type="text" name="name" class="form-control" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Добавить цель</button>
-                </form>
+<div class="card">
+    <div class="card-header">Новая цель</div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('add_target') }}" id="addTargetForm">
+            <div class="mb-2">
+                <label class="form-label">IQN цели</label>
+                <input type="text" name="name" class="form-control" id="iqnInput" required>
+                <small class="text-muted">Пример: iqn.2025-04.ru.example.server:disk1</small>
+                <button type="button" class="btn btn-sm btn-secondary mt-1" id="suggestIqn">Предложить IQN</button>
             </div>
-        </div>
+            <button type="submit" class="btn btn-primary">Создать</button>
+        </form>
+    </div>
+</div>
+<script>
+    document.getElementById('suggestIqn').addEventListener('click', function() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const hostname = window.location.hostname;
+        // Генерируем предложение: iqn.2025-04.ru.example.server:target1
+        let domain = hostname.split('.');
+        let reversedDomain = domain.slice(-2).join('.');
+        if (domain.length > 2) {
+            reversedDomain = domain.slice(-3).join('.');
+        }
+        const suggested = `iqn.${year}-${month}.${reversedDomain}:target${Math.floor(Math.random()*1000)}`;
+        document.getElementById('iqnInput').value = suggested;
+    });
+</script>
     </div>
     <div class="col-md-6">
         <div class="card">

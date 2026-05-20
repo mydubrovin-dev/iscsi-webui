@@ -350,17 +350,19 @@ def delete_target(tid):
 @login_required
 def add_lun(tid):
     path = request.form.get('path')
+    path_custom = request.form.get('path_custom')
+    if path_custom:
+        path = path_custom
     if not path:
-        flash('Путь к устройству/файлу не указан', 'danger')
+        flash('Путь не указан', 'danger')
         return redirect(url_for('target_detail', tid=tid))
     if not os.path.exists(path):
         flash(f'Путь {path} не существует', 'danger')
         return redirect(url_for('target_detail', tid=tid))
     lun = get_next_lun(int(tid))
-    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'new', '--mode', 'logicalunit',
-                                f'--tid={tid}', f'--lun={lun}', f'--backing-store={path}'])
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'new', '--mode', 'logicalunit', f'--tid={tid}', f'--lun={lun}', f'--backing-store={path}'])
     if rc == 0:
-        flash(f'LUN {lun} добавлен (бэк-стор {path})', 'success')
+        flash(f'LUN {lun} добавлен', 'success')
     else:
         flash(f'Ошибка: {stderr}', 'danger')
     return redirect(url_for('target_detail', tid=tid))
@@ -368,8 +370,10 @@ def add_lun(tid):
 @app.route('/delete_lun/<tid>/<lun_num>')
 @login_required
 def delete_lun(tid, lun_num):
-    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'delete', '--mode', 'logicalunit',
-                                f'--tid={tid}', f'--lun={lun_num}'])
+    if lun_num == '0':
+        flash('LUN 0 (контроллер) нельзя удалить', 'danger')
+        return redirect(url_for('target_detail', tid=tid))
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'delete', '--mode', 'logicalunit', f'--tid={tid}', f'--lun={lun_num}'])
     if rc == 0:
         flash(f'LUN {lun_num} удалён', 'success')
     else:
@@ -407,20 +411,33 @@ def delete_acl(tid, initiator):
 @app.route('/add_chap_to_target/<tid>', methods=['POST'])
 @login_required
 def add_chap_to_target(tid):
-    user = request.form.get('chap_user')
-    password = request.form.get('chap_password')
-    if not user or not password:
-        flash('Необходимо указать логин и пароль CHAP', 'danger')
-        return redirect(url_for('target_detail', tid=tid))
-    all_acc = get_all_chap_accounts()
-    if user not in all_acc:
-        ok, err = add_chap_account(user, password)
+    selected_user = request.form.get('chap_user_select')
+    new_user = request.form.get('chap_user_new')
+    new_password = request.form.get('chap_password_new')
+    
+    user = None
+    if selected_user:
+        user = selected_user
+        # пароль не нужен, учётка уже существует
+    elif new_user and new_password:
+        user = new_user
+        # проверим, существует ли уже такая учётка
+        all_acc = get_all_chap_accounts()
+        if user in all_acc:
+            flash(f'Учётка {user} уже существует. Используйте выбор из списка.', 'danger')
+            return redirect(url_for('target_detail', tid=tid))
+        ok, err = add_chap_account(user, new_password)
         if not ok:
             flash(f'Не удалось создать CHAP-учётку: {err}', 'danger')
             return redirect(url_for('target_detail', tid=tid))
+    else:
+        flash('Выберите существующую учётку или укажите новый логин и пароль', 'danger')
+        return redirect(url_for('target_detail', tid=tid))
+    
+    # Привязываем учётку к цели
     ok, err = bind_chap_to_target(tid, user)
     if ok:
-        flash(f'CHAP пользователь {user} привязан к цели TID {tid}', 'success')
+        flash(f'CHAP пользователь {user} привязан к цели', 'success')
     else:
         flash(f'Ошибка привязки CHAP: {err}', 'danger')
     return redirect(url_for('target_detail', tid=tid))
