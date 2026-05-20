@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %} - Файлы-образы{% endblock %}
+{% block content %}
+<h1>Управление файлами-образами</h1>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-header">📦 Создать новый образ</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('create_image_route') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Имя файла</label>
+                        <input type="text" name="name" class="form-control" placeholder="disk1.img" required>
+                        <small class="text-muted">.img будет добавлено автоматически, если отсутствует</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Размер (МБ)</label>
+                        <input type="number" name="size_mb" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Создать</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header">💾 Использование диска</div>
+            <div class="card-body">
+                <p>Директория: <code>{{ disk_usage.path }}</code></p>
+                <p>Всего: {{ (disk_usage.total / (1024**3))|round(1) }} GiB</p>
+                <p>Использовано: {{ (disk_usage.used / (1024**3))|round(1) }} GiB ({{ disk_usage.percent|round(1) }}%)</p>
+                <p>Свободно: {{ (disk_usage.free / (1024**3))|round(1) }} GiB</p>
+                <div class="progress">
+                    <div class="progress-bar" role="progressbar" style="width: {{ disk_usage.percent }}%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h3>Список образов</h3>
+{% if images %}
+    <table class="table table-striped">
+        <thead>
+            <tr><th>Имя</th><th>Размер (МБ)</th><th>Путь</th><th>Действие</th></tr>
+        </thead>
+        <tbody>
+        {% for img in images %}
+            <tr>
+                <td>{{ img.name }}</td>
+                <td>{{ img.size_mb }}</td>
+                <td><code>{{ img.path }}</code></td>
+                <td>
+                    <a href="{{ url_for('delete_image_route', name=img.name) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить образ {{ img.name }}?')">Удалить</a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div class="alert alert-info">Нет файлов-образов в {{ disk_usage.path }}</div>
+{% endif %}
+{% endblock %}

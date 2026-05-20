@@ -1,0 +1,17 @@
+[Unit]
+Description=iSCSI TGT Web UI (Gunicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/iscsi-tgt-webui
+Environment="PATH=/opt/iscsi-tgt-webui/venv/bin"
+Environment="ADMIN_USERNAME=admin"
+Environment="ADMIN_PASSWORD=your-secure-password"
+Environment="IMAGES_DIR=/var/lib/iscsi_images"
+ExecStart=/opt/iscsi-tgt-webui/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8000 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,115 +1,63 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>iSCSI TGT Web UI</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .card-header { background-color: #f8f9fa; }
-        .container { margin-top: 20px; }
-    </style>
-</head>
-<body>
-<div class="container">
-    <h1 class="mb-4">Управление iSCSI Target (TGT)</h1>
+{% extends "base.html" %}
+{% block title %} - Цели{% endblock %}
+{% block content %}
+<h1>Управление iSCSI целями (Targets)</h1>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5>➕ Создать новую цель (Target)</h5>
-        </div>
-        <div class="card-body">
-            <form method="post" action="{{ url_for('add_target') }}">
-                <div class="mb-3">
-                    <label for="name" class="form-label">IQN цели (например, iqn.2025-04.local.server:disk1)</label>
-                    <input type="text" class="form-control" id="name" name="name" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Добавить цель</button>
-            </form>
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Создать новую цель</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('add_target') }}">
+                    <div class="mb-3">
+                        <label class="form-label">IQN (например, iqn.2025-04.local.server:disk1)</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Добавить цель</button>
+                </form>
+            </div>
         </div>
     </div>
-
-    {% for target in targets %}
-    <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <strong>{{ target.name }} (TID: {{ target.id }})</strong>
-            <a href="{{ url_for('delete_target', tid=target.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить цель {{ target.name }}? Все LUN и ACL будут удалены.')">Удалить цель</a>
-        </div>
-        <div class="card-body">
-            <h6>💾 Logical Units (LUN)</h6>
-            {% if target.luns %}
-                <table class="table table-sm table-bordered">
-                    <thead>
-                        <tr><th>LUN</th><th>Тип</th><th>Backing store</th><th>Действие</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for lun in target.luns %}
-                        <tr>
-                            <td>{{ lun.num }}</td>
-                            <td>{{ lun.type }}</td>
-                            <td>{{ lun.path }}</td>
-                            <td>
-                                <a href="{{ url_for('delete_lun', tid=target.id, lun_num=lun.num) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить LUN {{ lun.num }}?')">Удалить</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p>Нет LUN</p>
-            {% endif %}
-
-            <form method="post" action="{{ url_for('add_lun', tid=target.id) }}" class="row g-2 mb-4">
-                <div class="col-auto">
-                    <input type="text" name="path" class="form-control form-control-sm" placeholder="/dev/sdb1 или /var/lib/iscsi/disk.img" required>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">Информация о дисковом пространстве (образы)</div>
+            <div class="card-body">
+                <p>Всего: {{ (disk_usage.total / (1024**3))|round(1) }} GiB</p>
+                <p>Использовано: {{ (disk_usage.used / (1024**3))|round(1) }} GiB ({{ disk_usage.percent|round(1) }}%)</p>
+                <p>Свободно: {{ (disk_usage.free / (1024**3))|round(1) }} GiB</p>
+                <div class="progress">
+                    <div class="progress-bar" role="progressbar" style="width: {{ disk_usage.percent }}%"></div>
                 </div>
-                <div class="col-auto">
-                    <button type="submit" class="btn btn-sm btn-success">➕ Добавить LUN</button>
-                </div>
-                <div class="col-auto">
-                    <small class="text-muted">(устройство или файл должен существовать)</small>
-                </div>
-            </form>
-
-            <h6>🔒 ACL (разрешенные инициаторы)</h6>
-            {% if target.acls %}
-                <ul class="list-group list-group-flush mb-3">
-                    {% for init in target.acls %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        {{ init }}
-                        <a href="{{ url_for('delete_acl', tid=target.id, initiator=init) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить доступ для {{ init }}?')">Удалить</a>
-                    </li>
-                    {% endfor %}
-                </ul>
-            {% else %}
-                <p>Нет ограничений (доступ любому инициатору)</p>
-            {% endif %}
-
-            <form method="post" action="{{ url_for('add_acl', tid=target.id) }}" class="row g-2">
-                <div class="col-auto">
-                    <input type="text" name="initiator" class="form-control form-control-sm" placeholder="iqn.1993-08.org.debian:01:client1" required>
-                </div>
-                <div class="col-auto">
-                    <button type="submit" class="btn btn-sm btn-primary">➕ Добавить ACL</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
-    {% else %}
-    <div class="alert alert-info">Нет ни одной цели. Создайте первую с помощью формы выше.</div>
-    {% endfor %}
 </div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+
+<h3>Существующие цели</h3>
+{% if targets %}
+    <div class="list-group">
+    {% for t in targets %}
+        <a href="{{ url_for('target_detail', tid=t.tid) }}" class="list-group-item list-group-item-action">
+            <strong>TID {{ t.tid }}</strong> — {{ t.name }} (LUN: {{ t.luns|length }}, ACL: {{ t.acls|length }})
+        </a>
+    {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-info">Нет созданных целей.</div>
+{% endif %}
+
+<h3 class="mt-4">Последние образы</h3>
+{% if images %}
+    <ul class="list-group">
+    {% for img in images[:5] %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ img.name }} ({{ img.size_mb }} МБ)
+            <span class="badge bg-secondary">{{ img.path }}</span>
+        </li>
+    {% endfor %}
+    </ul>
+    <a href="{{ url_for('images') }}" class="btn btn-sm btn-outline-primary mt-2">Все образы →</a>
+{% else %}
+    <p>Нет файлов-образов в {{ disk_usage.path }}</p>
+{% endif %}
+{% endblock %}

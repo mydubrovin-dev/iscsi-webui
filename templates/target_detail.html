@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %} - Цель {{ target.name }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center">
+    <h2>Цель: {{ target.name }} <small class="text-muted">(TID {{ target.tid }})</small></h2>
+    <a href="{{ url_for('delete_target', tid=target.tid) }}" class="btn btn-danger" onclick="return confirm('Удалить цель {{ target.name }}? Все LUN и ACL будут удалены.')">Удалить цель</a>
+</div>
+
+<h4 class="mt-4">💾 Logical Units (LUN)</h4>
+{% if target.luns %}
+    <table class="table table-bordered">
+        <thead>
+            <tr><th>LUN</th><th>Тип</th><th>Backing store</th><th>Действие</th></tr>
+        </thead>
+        <tbody>
+        {% for lun in target.luns %}
+            <tr>
+                <td>{{ lun.num }}</td><td>{{ lun.type }}</td><td>{{ lun.backing_store }}</td>
+                <td><a href="{{ url_for('delete_lun', tid=target.tid, lun_num=lun.num) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить LUN {{ lun.num }}?')">Удалить</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>Нет LUN</p>
+{% endif %}
+
+<h5>Добавить LUN</h5>
+<form method="post" action="{{ url_for('add_lun', tid=target.tid) }}" class="row g-3 mb-4">
+    <div class="col-auto">
+        <input type="text" name="path" class="form-control" placeholder="/dev/sdb1 или /var/lib/iscsi_images/disk1.img" required>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-success">➕ Добавить LUN</button>
+    </div>
+    <div class="col-auto">
+        <small class="text-muted">Можно указать существующий образ из списка: 
+        {% for img in images %}{{ img.path }} {% endfor %}
+        </small>
+    </div>
+</form>
+
+<h4>🔒 ACL (разрешённые инициаторы)</h4>
+{% if target.acls %}
+    <ul class="list-group mb-3">
+    {% for init in target.acls %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ init }}
+            <a href="{{ url_for('delete_acl', tid=target.tid, initiator=init) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить доступ для {{ init }}?')">Удалить</a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>Нет ограничений (доступ любому инициатору)</p>
+{% endif %}
+
+<h5>Добавить ACL</h5>
+<form method="post" action="{{ url_for('add_acl', tid=target.tid) }}" class="row g-3">
+    <div class="col-auto">
+        <input type="text" name="initiator" class="form-control" placeholder="iqn.1993-08.org.debian:01:client1" required>
+    </div>
+    <div class="col-auto">
+        <button type="submit" class="btn btn-primary">➕ Добавить ACL</button>
+    </div>
+</form>
+
+<p><a href="{{ url_for('index') }}" class="btn btn-secondary mt-4">← Назад к списку целей</a></p>
+{% endblock %}
