@@ -411,33 +411,17 @@ def delete_acl(tid, initiator):
 @app.route('/add_chap_to_target/<tid>', methods=['POST'])
 @login_required
 def add_chap_to_target(tid):
-    selected_user = request.form.get('chap_user_select')
-    new_user = request.form.get('chap_user_new')
-    new_password = request.form.get('chap_password_new')
-    
-    user = None
-    if selected_user:
-        user = selected_user
-        # пароль не нужен, учётка уже существует
-    elif new_user and new_password:
-        user = new_user
-        # проверим, существует ли уже такая учётка
-        all_acc = get_all_chap_accounts()
-        if user in all_acc:
-            flash(f'Учётка {user} уже существует. Используйте выбор из списка.', 'danger')
-            return redirect(url_for('target_detail', tid=tid))
-        ok, err = add_chap_account(user, new_password)
-        if not ok:
-            flash(f'Не удалось создать CHAP-учётку: {err}', 'danger')
-            return redirect(url_for('target_detail', tid=tid))
-    else:
-        flash('Выберите существующую учётку или укажите новый логин и пароль', 'danger')
+    user = request.form.get('chap_user')
+    if not user:
+        flash('Не выбран CHAP пользователь', 'danger')
         return redirect(url_for('target_detail', tid=tid))
-    
-    # Привязываем учётку к цели
+    all_acc = get_all_chap_accounts()
+    if user not in all_acc:
+        flash(f'Учётка {user} не существует. Создайте её на странице CHAP.', 'danger')
+        return redirect(url_for('target_detail', tid=tid))
     ok, err = bind_chap_to_target(tid, user)
     if ok:
-        flash(f'CHAP пользователь {user} привязан к цели', 'success')
+        flash(f'CHAP пользователь {user} привязан к цели TID {tid}', 'success')
     else:
         flash(f'Ошибка привязки CHAP: {err}', 'danger')
     return redirect(url_for('target_detail', tid=tid))
