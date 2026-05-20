@@ -38,7 +38,11 @@
     <div class="list-group">
     {% for t in targets %}
         <a href="{{ url_for('target_detail', tid=t.tid) }}" class="list-group-item list-group-item-action">
-            <strong>TID {{ t.tid }}</strong> — {{ t.name }} (LUN: {{ t.luns|length }}, ACL: {{ t.acls|length }})
+            <div class="d-flex justify-content-between">
+                <span><strong>TID {{ t.tid }}</strong> — {{ t.name }}</span>
+                <span class="badge bg-info">Активных сессий: {{ t.active_sessions }}</span>
+            </div>
+            <small>LUN: {{ t.luns|length }}, ACL: {{ t.acls|length }}</small>
         </a>
     {% endfor %}
     </div>
@@ -60,4 +64,6 @@
 {% else %}
     <p>Нет файлов-образов в {{ disk_usage.path }}</p>
 {% endif %}
+
+<p class="mt-4"><a href="{{ url_for('chap_accounts') }}" class="btn btn-outline-secondary">Управление CHAP учётными записями</a></p>
 {% endblock %}

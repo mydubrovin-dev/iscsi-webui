@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %} - CHAP учётные записи{% endblock %}
+{% block content %}
+<h1>Управление CHAP учётными записями</h1>
+
+<div class="row">
+    <div class="col-md-4">
+        <div class="card mb-4">
+            <div class="card-header">➕ Создать новую CHAP учётку</div>
+            <div class="card-body">
+                <form method="post" action="{{ url_for('add_chap_account_route') }}">
+                    <div class="mb-3">
+                        <label class="form-label">Логин</label>
+                        <input type="text" name="user" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Пароль</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Создать</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <h3>Существующие учётки</h3>
+        {% if accounts %}
+            <table class="table table-striped">
+                <thead><tr><th>Логин</th><th>Действие</th></tr></thead>
+                <tbody>
+                {% for acc in accounts %}
+                    <tr>
+                        <td>{{ acc }}</td>
+                        <td><a href="{{ url_for('delete_chap_account_route', user=acc) }}" class="btn btn-sm btn-danger" onclick="return confirm('Удалить CHAP учётку {{ acc }}? Все привязки к целям потеряются.')">Удалить</a></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="alert alert-info">Нет созданных CHAP учётных записей.</div>
+        {% endif %}
+    </div>
+</div>
+
+<p><a href="{{ url_for('index') }}" class="btn btn-secondary mt-3">← Назад</a></p>
+{% endblock %}

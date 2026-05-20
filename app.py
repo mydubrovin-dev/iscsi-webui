@@ -4,10 +4,10 @@ import subprocess
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import unquote
 
-from flask import Flask, render_template, request, redirect, url_for, flash, abort
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-import psutil
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 
 from config import Config
 
@@ -18,7 +18,6 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Простая модель пользователя
 class User(UserMixin):
     def __init__(self, id):
         self.id = id
@@ -29,63 +28,149 @@ def load_user(user_id):
         return User(user_id)
     return None
 
-# ------------------- Утилиты для работы с tgtadm -------------------
-def run_tgtadm(args, check=True):
-    """Выполняет tgtadm с sudo (предполагается настроенный sudo без пароля)"""
-    cmd = ['sudo', Config.TGTADM_CMD] + args
+# ------------------- Утилиты для работы с tgt-admin -------------------
+def run_tgtadmin(args, check=True):
+    """Выполняет tgt-admin через sudo, возвращает (stdout, stderr, returncode)"""
+    cmd = ['/usr/bin/sudo', 'tgt-admin'] + args
     result = subprocess.run(cmd, capture_output=True, text=True)
     if check and result.returncode != 0:
         app.logger.error(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
     return result.stdout, result.stderr, result.returncode
 
 def parse_targets():
-    """Парсит вывод tgtadm --lld iscsi --op show --mode target"""
-    out, _, _ = run_tgtadm(['--lld', 'iscsi', '--op', 'show', '--mode', 'target'])
+    """
+    Парсит вывод tgt-admin -s
+    Возвращает список целей с LUN, ACL, CHAP-аккаунтами, сессиями.
+    """
+    out, _, _ = run_tgtadmin(['-s'])
     targets = []
-    current = None
+    current_target = None
+    current_lun = None
+    current_session = None
     lines = out.splitlines()
     i = 0
     while i < len(lines):
         line = lines[i].strip()
+        if not line:
+            i += 1
+            continue
+        
+        # Начало цели: "Target 1: iqn.2026-05.ru.ite-ng:ite205"
         if line.startswith('Target '):
-            if current:
-                targets.append(current)
-            parts = line.split(':')
-            tid = parts[0].split()[1]
-            name = parts[1].strip()
-            current = {
+            if current_target:
+                targets.append(current_target)
+            # Разбираем: "Target 1: iqn.2026-05.ru.ite-ng:ite205"
+            parts = line.split(':', 1)
+            tid_name = parts[0].split()
+            tid = tid_name[1]
+            name = parts[1].strip() if len(parts) > 1 else ""
+            current_target = {
                 'tid': tid,
                 'name': name,
                 'luns': [],
+                'sessions': [],
                 'acls': [],
                 'accounts': []
             }
-        elif line.startswith('LUN:') and current:
-            lun_num = line.split()[1]
-            # Следующие строки содержат информацию
-            lun_type = ''
-            backing_store = ''
-            j = i+1
-            while j < len(lines) and lines[j].strip():
-                l = lines[j].strip()
-                if l.startswith('Type:'):
-                    lun_type = l.split()[1]
-                elif l.startswith('Backing store path:'):
-                    backing_store = l.split(':', 1)[1].strip()
-                elif l.startswith('LUN:'):
-                    break
-                j += 1
-            current['luns'].append({
+            current_lun = None
+            current_session = None
+        
+        # Если цель ещё не начата, пропускаем
+        elif current_target is None:
+            i += 1
+            continue
+        
+        # Системная информация (не нужна для отображения)
+        elif line.startswith('System information:'):
+            pass
+        
+        # I_T nexus information (сессии и подключения)
+        elif line.startswith('I_T nexus information:'):
+            pass
+        
+        elif line.startswith('I_T nexus:'):
+            # Начинаем новую сессию
+            # Пример: "I_T nexus: 12"
+            nexus_id = line.split(':')[1].strip()
+            current_session = {
+                'id': nexus_id,
+                'initiator': '',
+                'ip': '',
+                'luns': []
+            }
+            if current_target:
+                current_target['sessions'].append(current_session)
+        
+        elif line.startswith('Initiator:') and current_session:
+            # "Initiator: iqn.2026-05.ru.ite-ng:ite203 alias: none"
+            init_str = line.split(':', 1)[1].strip()
+            # отделяем alias
+            if ' alias:' in init_str:
+                initiator = init_str.split(' alias:')[0]
+            else:
+                initiator = init_str
+            current_session['initiator'] = initiator
+        
+        elif line.startswith('IP Address:') and current_session:
+            ip = line.split(':', 1)[1].strip()
+            current_session['ip'] = ip
+        
+        elif line.startswith('LUN information:'):
+            pass
+        
+        elif line.startswith('LUN:') and not line.startswith('LUN information:'):
+            # Начинаем новый LUN
+            lun_num = line.split(':')[1].strip()
+            current_lun = {
                 'num': lun_num,
-                'type': lun_type,
-                'backing_store': backing_store
-            })
-        elif line.startswith('ACL:') and current:
+                'type': '',
+                'backing_store': '',
+                'size': ''
+            }
+            if current_target:
+                current_target['luns'].append(current_lun)
+        
+        # Поля внутри LUN
+        elif line.startswith('Type:') and current_lun:
+            current_lun['type'] = line.split(':', 1)[1].strip()
+        elif line.startswith('Backing store path:') and current_lun:
+            path = line.split(':', 1)[1].strip()
+            if path != 'None':
+                current_lun['backing_store'] = path
+        elif line.startswith('Size:') and current_lun:
+            size_str = line.split(':', 1)[1].strip()
+            # Пример: "Size: 32212 MB"
+            current_lun['size'] = size_str
+        
+        # Account information
+        elif line.startswith('Account information:'):
+            pass
+        elif current_target and (line.startswith('Account:') or (not line.startswith('ACL') and current_target and 'Account information' in lines[max(0,i-1)])):
+            # В выводе после "Account information:" идут имена аккаунтов без маркера "Account:"? 
+            # По примеру: строка "        backupadmin"
+            if line and not line.startswith('ACL') and not line.startswith('I_T nexus') and not line.startswith('LUN'):
+                # Просто имя аккаунта
+                acc = line.strip()
+                if acc and acc not in current_target['accounts']:
+                    current_target['accounts'].append(acc)
+        
+        # ACL information
+        elif line.startswith('ACL information:'):
+            pass
+        elif line.startswith('ACL:') and current_target:
             acl = line.split(':', 1)[1].strip()
-            current['acls'].append(acl)
+            if acl not in current_target['acls']:
+                current_target['acls'].append(acl)
+        elif current_target and line and not line.startswith('Target') and not line.startswith('System') and not line.startswith('I_T') and not line.startswith('LUN') and not line.startswith('Account') and not line.startswith('ACL') and not line.startswith('Initiator') and not line.startswith('IP'):
+            # В некоторых версиях ACL может быть просто строка "ALL" без префикса "ACL:"
+            if line == 'ALL' and 'ALL' not in current_target['acls']:
+                current_target['acls'].append('ALL')
+        
         i += 1
-    if current:
-        targets.append(current)
+    
+    if current_target:
+        targets.append(current_target)
+    
     return targets
 
 def get_next_tid():
@@ -107,9 +192,46 @@ def get_next_lun(tid):
             return lun
     return 0
 
+# ------------------- Работа с CHAP (через tgtadm, так как tgt-admin не умеет управлять) -------------------
+def run_tgtadm(args, check=True):
+    cmd = ['/usr/bin/sudo', Config.TGTADM_CMD] + args
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        app.logger.error(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
+    return result.stdout, result.stderr, result.returncode
+
+def get_all_chap_accounts():
+    out, _, _ = run_tgtadm(['--lld', 'iscsi', '--op', 'show', '--mode', 'account'])
+    accounts = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith('Account:'):
+            acc = line.split(':', 1)[1].strip()
+            accounts.append(acc)
+    return accounts
+
+def add_chap_account(user, password):
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'new', '--mode', 'account',
+                                '--user', user, '--password', password])
+    return rc == 0, stderr
+
+def delete_chap_account(user):
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'delete', '--mode', 'account',
+                                '--user', user])
+    return rc == 0, stderr
+
+def bind_chap_to_target(tid, user):
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'bind', '--mode', 'target',
+                                f'--tid={tid}', '--account', user])
+    return rc == 0, stderr
+
+def unbind_chap_from_target(tid, user):
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'unbind', '--mode', 'target',
+                                f'--tid={tid}', '--account', user])
+    return rc == 0, stderr
+
 # ------------------- Работа с файлами-образами -------------------
 def get_images_info():
-    """Возвращает список словарей с информацией о файлах-образах: имя, размер, путь"""
     images_dir = Path(Config.IMAGES_DIR)
     images_dir.mkdir(exist_ok=True)
     images = []
@@ -128,13 +250,11 @@ def get_images_info():
     return images
 
 def create_image(name, size_mb):
-    """Создаёт файл-образ заданного размера (в МБ) с помощью dd"""
     images_dir = Path(Config.IMAGES_DIR)
     images_dir.mkdir(exist_ok=True)
     path = images_dir / name
     if path.exists():
         return False, "Файл уже существует"
-    # Создаём файл с нулями
     try:
         subprocess.run(['dd', 'if=/dev/zero', f'of={path}', f'bs=1M', f'count={size_mb}'],
                        check=True, stderr=subprocess.PIPE)
@@ -150,16 +270,16 @@ def delete_image(name):
     return False, "Файл не найден"
 
 def get_disk_usage():
-    """Возвращает информацию о свободном месте на диске, где хранятся образы"""
     usage = shutil.disk_usage(Config.IMAGES_DIR)
     return {
         'total': usage.total,
         'used': usage.used,
         'free': usage.free,
-        'percent': (usage.used / usage.total) * 100
+        'percent': (usage.used / usage.total) * 100,
+        'path': Config.IMAGES_DIR
     }
 
-# ------------------- Маршруты веб-интерфейса -------------------
+# ------------------- Маршруты -------------------
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -196,7 +316,8 @@ def target_detail(tid):
         flash('Цель не найдена', 'danger')
         return redirect(url_for('index'))
     images = get_images_info()
-    return render_template('target_detail.html', target=target, images=images)
+    all_chap_accounts = get_all_chap_accounts()
+    return render_template('target_detail.html', target=target, images=images, all_chap_accounts=all_chap_accounts)
 
 @app.route('/add_target', methods=['POST'])
 @login_required
@@ -206,6 +327,7 @@ def add_target():
         flash('IQN не может быть пустым', 'danger')
         return redirect(url_for('index'))
     tid = get_next_tid()
+    # используем tgtadm для создания, так как tgt-admin в основном для конфигов
     _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'new', '--mode', 'target',
                                 f'--tid={tid}', f'--targetname={name}'])
     if rc == 0:
@@ -231,7 +353,6 @@ def add_lun(tid):
     if not path:
         flash('Путь к устройству/файлу не указан', 'danger')
         return redirect(url_for('target_detail', tid=tid))
-    # Проверяем существование файла
     if not os.path.exists(path):
         flash(f'Путь {path} не существует', 'danger')
         return redirect(url_for('target_detail', tid=tid))
@@ -273,7 +394,6 @@ def add_acl(tid):
 @app.route('/delete_acl/<tid>/<path:initiator>')
 @login_required
 def delete_acl(tid, initiator):
-    from urllib.parse import unquote
     initiator = unquote(initiator)
     _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'unbind', '--mode', 'target',
                                 f'--tid={tid}', f'--initiator-address={initiator}'])
@@ -283,7 +403,69 @@ def delete_acl(tid, initiator):
         flash(f'Ошибка: {stderr}', 'danger')
     return redirect(url_for('target_detail', tid=tid))
 
-# Управление образами
+# CHAP на уровне цели
+@app.route('/add_chap_to_target/<tid>', methods=['POST'])
+@login_required
+def add_chap_to_target(tid):
+    user = request.form.get('chap_user')
+    password = request.form.get('chap_password')
+    if not user or not password:
+        flash('Необходимо указать логин и пароль CHAP', 'danger')
+        return redirect(url_for('target_detail', tid=tid))
+    all_acc = get_all_chap_accounts()
+    if user not in all_acc:
+        ok, err = add_chap_account(user, password)
+        if not ok:
+            flash(f'Не удалось создать CHAP-учётку: {err}', 'danger')
+            return redirect(url_for('target_detail', tid=tid))
+    ok, err = bind_chap_to_target(tid, user)
+    if ok:
+        flash(f'CHAP пользователь {user} привязан к цели TID {tid}', 'success')
+    else:
+        flash(f'Ошибка привязки CHAP: {err}', 'danger')
+    return redirect(url_for('target_detail', tid=tid))
+
+@app.route('/remove_chap_from_target/<tid>/<user>')
+@login_required
+def remove_chap_from_target(tid, user):
+    ok, err = unbind_chap_from_target(tid, user)
+    if ok:
+        flash(f'CHAP пользователь {user} отвязан от цели TID {tid}', 'success')
+    else:
+        flash(f'Ошибка отвязки CHAP: {err}', 'danger')
+    return redirect(url_for('target_detail', tid=tid))
+
+@app.route('/chap_accounts')
+@login_required
+def chap_accounts():
+    accounts = get_all_chap_accounts()
+    return render_template('chap_accounts.html', accounts=accounts)
+
+@app.route('/add_chap_account', methods=['POST'])
+@login_required
+def add_chap_account_route():
+    user = request.form.get('user')
+    password = request.form.get('password')
+    if not user or not password:
+        flash('Логин и пароль обязательны', 'danger')
+        return redirect(url_for('chap_accounts'))
+    ok, err = add_chap_account(user, password)
+    if ok:
+        flash(f'CHAP учётка {user} создана', 'success')
+    else:
+        flash(f'Ошибка: {err}', 'danger')
+    return redirect(url_for('chap_accounts'))
+
+@app.route('/delete_chap_account/<user>')
+@login_required
+def delete_chap_account_route(user):
+    ok, err = delete_chap_account(user)
+    if ok:
+        flash(f'CHAP учётка {user} удалена', 'success')
+    else:
+        flash(f'Ошибка: {err}', 'danger')
+    return redirect(url_for('chap_accounts'))
+
 @app.route('/images')
 @login_required
 def images():
@@ -324,5 +506,4 @@ def delete_image_route(name):
     return redirect(url_for('images'))
 
 if __name__ == '__main__':
-    # Для разработки, в production используйте gunicorn
     app.run(host='0.0.0.0', port=5000, debug=False)
