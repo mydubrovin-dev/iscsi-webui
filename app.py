@@ -3,6 +3,7 @@ import os
 import subprocess
 import re
 import shutil
+import socket
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -27,6 +28,16 @@ def load_user(user_id):
     if user_id == Config.ADMIN_USERNAME:
         return User(user_id)
     return None
+
+def get_server_ips():
+    """Возвращает список всех IPv4-адресов сервера (кроме localhost)"""
+    try:
+        result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, check=True)
+        ips = result.stdout.strip().split()
+        # отфильтруем localhost (127.0.0.1) если он попал
+        return [ip for ip in ips if not ip.startswith('127.')]
+    except:
+        return []
 
 # ------------------- Утилиты для работы с tgt-admin -------------------
 def run_tgtadmin(args, check=True):
@@ -203,13 +214,19 @@ def run_tgtadm(args, check=True):
 def get_all_chap_accounts():
     out, _, _ = run_tgtadm(['--lld', 'iscsi', '--op', 'show', '--mode', 'account'])
     accounts = []
-    for line in out.splitlines():
+    lines = out.splitlines()
+    for line in lines:
         line = line.strip()
-        if line.startswith('Account:'):
-            acc = line.split(':', 1)[1].strip()
-            accounts.append(acc)
+        if line and not line.startswith('Account list:'):
+            # Убираем возможные префиксы "Account:" если есть
+            if line.startswith('Account:'):
+                acc = line.split(':', 1)[1].strip()
+            else:
+                acc = line
+            if acc:
+                accounts.append(acc)
     return accounts
-
+    
 def add_chap_account(user, password):
     _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'new', '--mode', 'account',
                                 '--user', user, '--password', password])
@@ -221,13 +238,13 @@ def delete_chap_account(user):
     return rc == 0, stderr
 
 def bind_chap_to_target(tid, user):
-    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'bind', '--mode', 'target',
-                                f'--tid={tid}', '--account', user])
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'bind', '--mode', 'account',
+                                f'--tid={tid}', '--user', user])
     return rc == 0, stderr
 
 def unbind_chap_from_target(tid, user):
-    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'unbind', '--mode', 'target',
-                                f'--tid={tid}', '--account', user])
+    _, stderr, rc = run_tgtadm(['--lld', 'iscsi', '--op', 'unbind', '--mode', 'account',
+                                f'--tid={tid}', '--user', user])
     return rc == 0, stderr
 
 # ------------------- Работа с файлами-образами -------------------
@@ -305,7 +322,8 @@ def index():
     targets = parse_targets()
     disk_usage = get_disk_usage()
     images = get_images_info()
-    return render_template('index.html', targets=targets, disk_usage=disk_usage, images=images)
+    server_ips = get_server_ips()   # <-- добавить
+    return render_template('index.html', targets=targets, disk_usage=disk_usage, images=images, server_ips=server_ips)
 
 @app.route('/target/<tid>')
 @login_required
@@ -317,6 +335,7 @@ def target_detail(tid):
         return redirect(url_for('index'))
     images = get_images_info()
     all_chap_accounts = get_all_chap_accounts()
+    #app.logger.error(f"CHAP accounts: {all_chap_accounts}")  # отладка
     return render_template('target_detail.html', target=target, images=images, all_chap_accounts=all_chap_accounts)
 
 @app.route('/add_target', methods=['POST'])

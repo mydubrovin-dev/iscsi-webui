@@ -50,6 +50,23 @@
         </div>
     </div>
 </div>
+<div class="card mb-4">
+    <div class="card-header">🌐 Информация для подключения iSCSI</div>
+    <div class="card-body">
+        <p><strong>Порт iSCSI:</strong> 3260 (стандартный, если не изменён)</p>
+        <p><strong>IP-адреса сервера:</strong></p>
+        <ul>
+            {% for ip in server_ips %}
+                <li><code>{{ ip }}</code></li>
+            {% else %}
+                <li>Не удалось определить IP-адреса</li>
+            {% endfor %}
+        </ul>
+        <p class="text-muted small">Пример подключения на клиенте:<br>
+        <code>iscsiadm -m discovery -t sendtargets -p {{ server_ips[0] if server_ips else 'IP_сервера' }}:3260</code><br>
+        <code>iscsiadm -m node --login</code></p>
+    </div>
+</div>
 
 <h3>Существующие цели</h3>
 {% if targets %}
